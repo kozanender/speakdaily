@@ -286,8 +286,9 @@ const PACK = {
 };
 
 /* ---------- Sürüm, hedef süre, seviye ---------- */
-const APP_VERSION="1.3.0", LIB_VERSION="2026.11.04";
+const APP_VERSION="1.3.1", LIB_VERSION="2026.11.04";
 const CHANGES=[
+  ["1.3.1","04.11.2026","Otomatik güncelleme: uygulama öne geldiğinde yeni sürümü kendisi yükler"],
   ["1.3.0","04.11.2026","Sabit A2 / B1 / B2 seçimi, seviyeye göre Listening ve Reading, Kütüphane sekmesi, 20–60 dakika günlük süre seçimi"],
   ["1.2.0","04.11.2026","1056 cümlelik cümle bankası, günlük cümle planı, Cümle Bankası ekranı"],
   ["1.1.0","04.11.2026","Gerçek mikrofon ve cihaz içinde ses tanıma, internetsiz çalışma, ses durdurma"],
@@ -914,7 +915,22 @@ function downloadIcs(){
 }
 const _renderSum=renderSum;renderSum=function(){_renderSum();const s=document.getElementById("modelSel");if(s)s.value=model};
 if(!store.get("modelReady",false))modelUI("idle");
-if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+/* ---------- Otomatik güncelleme ---------- */
+if("serviceWorker" in navigator){
+  const hadController=!!navigator.serviceWorker.controller;let reloading=false;
+  // Yeni sürüm devreye girince sayfayı bir kez yenile (kayıt sırasında beklet)
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{
+    if(!hadController||reloading)return;reloading=true;
+    const go=()=>{if(rec){setTimeout(go,2000);return}try{sessionStorage.setItem("sd_updated","1")}catch(e){}location.reload()};go();
+  });
+  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(reg=>{
+    const check=()=>{if(navigator.onLine)reg.update().catch(()=>{})};
+    // Uygulama arka plandan öne gelince ve her 30 dakikada bir yeni sürüm var mı bak
+    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")check()});
+    setInterval(check,30*60*1000);
+  }).catch(()=>{}));
+  try{if(sessionStorage.getItem("sd_updated")){sessionStorage.removeItem("sd_updated");setTimeout(()=>toast(`Uygulama güncellendi: sürüm ${APP_VERSION}`),800)}}catch(e){}
+}
 render();
 </script>
 

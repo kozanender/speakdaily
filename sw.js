@@ -1,5 +1,5 @@
 // SpeakDaily service worker: uygulamayı internetsiz açılabilir yapar.
-const VERSION = "speakdaily-v3";
+const VERSION = "speakdaily-v4";
 const SHELL = [
   "./",
   "./index.html",
@@ -36,8 +36,8 @@ self.addEventListener("fetch", (e) => {
   // Güncelleme denetimi her zaman sunucuya gider.
   if (url.pathname.endsWith("/content/meta.json")) return;
 
-  if (req.mode === "navigate") {
-    e.respondWith(fetch(req).catch(() => caches.match("./index.html")));
+  if (req.mode === "navigate" || url.pathname.endsWith("/index.html")) {
+    e.respondWith(fetch(req, { cache: "no-store" }).then((res) => { const c = res.clone(); caches.open(VERSION).then((x) => x.put("./index.html", c)); return res; }).catch(() => caches.match("./index.html")));
     return;
   }
 
