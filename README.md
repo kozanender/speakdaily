@@ -9,6 +9,7 @@ Telefona ve bilgisayara uygulama olarak kurulan, internetsiz çalışan İngiliz
 | `index.html` | Uygulamanın kendisi (ekranlar, içerik, düzeltme motoru, mikrofon) |
 | `whisper-worker.js` | Sesi yazıya çeviren Whisper modeli, telefonun içinde çalışır |
 | `sw.js` | Uygulamanın internetsiz açılmasını sağlar |
+| `content/meta.json` | Kütüphane ve uygulama sürümü (güncelleme denetimi için) |
 | `content/sentences.json` | Cümle bankası (A2, B1, B2 seviyelerinde günlük konuşma cümleleri) |
 | `manifest.webmanifest` | Uygulama adı, ikon ve renkler (ana ekrana ekleme için) |
 | `icons/` | Uygulama ikonları |
@@ -47,7 +48,10 @@ Bundan sonra uygulama internet olmadan çalışır.
 
 ## Bu sürümde neler var
 
-- 20 dakikalık günlük plan ve aktif süre sayacı, seri (streak) takibi
+- Üst bantta her zaman görünen A2 / B1 / B2 seçimi: shadowing cümleleri, Listening ve Reading seçilen seviyeye göre gelir
+- Günlük süre seçimi (20–60 dakika, Kütüphane sekmesinde); süre arttıkça günlük cümle sayısı da artar
+- Kütüphane sekmesi: kütüphane ve uygulama sürümü, seviyelere göre içerik sayıları, ilerleme, güncelleme denetimi, sürüm geçmişi
+- Aktif süre sayacı, seri (streak) takibi
 - Cümle bankası: her gün seçilen seviyeden (A2, B1, B2 ya da sırayla) yeni cümleler, kaldığı yerden devam; Cümle Bankası ekranında seviye, konu ve arama ile istediğin cümleyi bugüne ekleyebilirsin
 - Shadowing döngüsü: kelimeler (önce Türkçe, sonra İngilizce örnek) → dinle ve tekrarla → Türkçe → İngilizce → sonuç
 - Gerçek mikrofon kaydı ve cihaz içinde ses tanıma (Whisper)
@@ -65,4 +69,4 @@ Bundan sonra uygulama internet olmadan çalışır.
 
 ## Güncelleme yayınlama
 
-Dosyaları değiştirdikten sonra `sw.js` içindeki `VERSION` değerini artır (ör. `speakdaily-v2`) ve klasörü yeniden yükle. Telefondaki uygulama bir sonraki açılışta güncellenir.
+Dosyaları değiştirdikten sonra `sw.js` içindeki `VERSION` değerini, `content/meta.json` ile `index.html` içindeki sürüm numaralarını artır ve klasörü yeniden yükle. Telefondaki uygulama bir sonraki açılışta güncellenir.

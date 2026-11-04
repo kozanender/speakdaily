@@ -1,5 +1,5 @@
 // SpeakDaily service worker: uygulamayı internetsiz açılabilir yapar.
-const VERSION = "speakdaily-v2";
+const VERSION = "speakdaily-v3";
 const SHELL = [
   "./",
   "./index.html",
@@ -33,6 +33,8 @@ self.addEventListener("fetch", (e) => {
 
   // Model dosyalarını (huggingface.co) ses tanıma kütüphanesi kendisi önbelleğe alır.
   if (url.hostname.endsWith("huggingface.co") || url.hostname.endsWith("hf.co")) return;
+  // Güncelleme denetimi her zaman sunucuya gider.
+  if (url.pathname.endsWith("/content/meta.json")) return;
 
   if (req.mode === "navigate") {
     e.respondWith(fetch(req).catch(() => caches.match("./index.html")));

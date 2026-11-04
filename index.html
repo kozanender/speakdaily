@@ -66,6 +66,18 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .seg{display:inline-flex;border:2px solid var(--sign-ink);border-radius:6px;overflow:hidden}
 .seg button{border:0;background:transparent;color:var(--sign-ink);padding:4px 10px;font-family:var(--mono);font-size:.78rem;font-weight:600}
 .seg button[aria-pressed="true"]{background:var(--sign-ink);color:var(--sign)}
+.lvlseg button{padding:6px 12px;font-size:.85rem}
+.range{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.range input[type=range]{flex:1;min-width:200px;accent-color:var(--accent)}
+.range output{font-family:var(--mono);font-weight:600;font-size:1.3rem;font-variant-numeric:tabular-nums;min-width:5ch}
+.ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.75rem;color:var(--muted);max-width:520px}
+.status{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pill{font-family:var(--mono);font-size:.75rem;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.pill.ok{background:var(--okbg);color:var(--ok)}.pill.warn{background:var(--warnbg);color:var(--warn)}
+.prog2{height:8px;border-radius:4px;background:var(--sunk);overflow:hidden}
+.prog2 i{display:block;height:100%;background:var(--accent)}
+.lvlrow{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;align-items:center}
+.changes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
 
 /* Progress meter */
 .meter{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:.82rem;font-weight:600}
@@ -190,6 +202,11 @@ td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
         <span class="bar" aria-hidden="true"><i id="timeBar"></i></span>
       </div>
       <span class="chip" id="streakChip">Seri 0 gün</span>
+      <div class="seg lvlseg" role="group" aria-label="Seviye">
+        <button data-level="A2" aria-pressed="false">A2</button>
+        <button data-level="B1" aria-pressed="true">B1</button>
+        <button data-level="B2" aria-pressed="false">B2</button>
+      </div>
       <div class="seg" role="group" aria-label="Aksan">
         <button id="accUS" aria-pressed="true">US</button>
         <button id="accGB" aria-pressed="false">GB</button>
@@ -201,9 +218,9 @@ td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
 <main class="wrap">
   <div class="modelbar" id="modelBar" hidden></div>
   <nav class="rail" aria-label="Bugünün planı">
-    <h2>Bugünün planı · 20 dk</h2>
+    <h2 id="planHead">Bugünün planı · 20 dk</h2>
     <ul class="plan" id="plan"></ul>
-    <p class="railnote">Süre yalnızca sayfa açıkken ve son 90 saniyede bir şey yaptıysan sayılır. 20 dakika dolunca günlük hedef tamamlanır.</p>
+    <p class="railnote">Süre yalnızca sayfa açıkken ve son 90 saniyede bir şey yaptıysan sayılır. <span id="goalNote">20</span> dakika dolunca günlük hedef tamamlanır.</p>
   </nav>
   <section class="card" id="view" aria-live="polite"></section>
 </main>
@@ -268,6 +285,18 @@ const PACK = {
   }
 };
 
+/* ---------- Sürüm, hedef süre, seviye ---------- */
+const APP_VERSION="1.3.0", LIB_VERSION="2026.11.04";
+const CHANGES=[
+  ["1.3.0","04.11.2026","Sabit A2 / B1 / B2 seçimi, seviyeye göre Listening ve Reading, Kütüphane sekmesi, 20–60 dakika günlük süre seçimi"],
+  ["1.2.0","04.11.2026","1056 cümlelik cümle bankası, günlük cümle planı, Cümle Bankası ekranı"],
+  ["1.1.0","04.11.2026","Gerçek mikrofon ve cihaz içinde ses tanıma, internetsiz çalışma, ses durdurma"],
+  ["1.0.0","04.11.2026","İlk sürüm: shadowing döngüsü, düzeltme motoru, takvim hatırlatması"]];
+function goalMin(){const g=+(localStorage.getItem("sd_goalMin")||20);return Math.min(60,Math.max(20,g||20))}
+function goalSec(){return goalMin()*60}
+function countFor(g){return Math.round(g*6/20)}
+function lvl(){let l=null;try{l=JSON.parse(localStorage.getItem("sd_level"))}catch(e){}return ["A2","B1","B2"].includes(l)?l:"B1"}
+
 /* ---------- Cümle bankası (content/sentences.json) ---------- */
 PACK.sentences.forEach(x=>{x.level=x.level||"B1";x.topic="İş: "+x.topic});
 let BANK=[];                 // tüm cümleler (iş cümleleri + JSON)
@@ -278,26 +307,36 @@ function bankFrom(json){
   const items=(json.items||[]).map(it=>({id:"b"+it.id,level:it.level,topic:it.topic_tr||it.topic_en||"",topic_en:it.topic_en||"",en:it.en,tr:it.tr,accepted:[it.en],vocab:[],note:""}));
   return PACK.sentences.concat(items);
 }
-function seqFor(level){return level==="mix"?BANK:BANK.filter(x=>x.level===level)}
+function seqFor(level){return BANK.filter(x=>x.level===level)}
+const LIB={title:"",count:0,checked:null,status:""};
 function byId(id){return BANK.find(x=>x.id===id)||PACK.sentences.find(x=>x.id===id)}
 function dayKey(offset){const d=new Date();d.setDate(d.getDate()+offset);return d.toISOString().slice(0,10)}
-function buildPlan(force){
-  let plan=store.get("plan_"+today,null);
-  if(!plan||force){
-    const level=store.get("level","B1"),count=store.get("count",6);
-    const seq=seqFor(level);if(!seq.length)return;
-    let ptr=store.get("ptr_"+level,0)%seq.length;
-    if(force&&plan&&plan.level===level)ptr=plan.start;
-    const ids=[];for(let k=0;k<count;k++)ids.push(seq[(ptr+k)%seq.length].id);
-    plan={level,start:ptr,ids};
-    store.set("plan_"+today,plan);store.set("ptr_"+level,(ptr+count)%seq.length);
+function getPlan(day,level){
+  const p=store.get("plan_"+day+"_"+level,null);if(p)return p;
+  const old=store.get("plan_"+day,null);return old&&old.level===level?old:null;
+}
+function buildPlan(){
+  const level=lvl(),count=countFor(goalMin()),seq=seqFor(level);if(!seq.length)return;
+  let plan=getPlan(today,level);
+  if(!plan){plan={level,start:store.get("ptr_"+level,0)%seq.length,ids:[]}}
+  if(plan.ids.length<count){
+    let ptr=(plan.start+plan.ids.length)%seq.length;
+    while(plan.ids.length<count){plan.ids.push(seq[ptr].id);ptr=(ptr+1)%seq.length}
+    store.set("ptr_"+level,ptr);
   }
+  store.set("plan_"+today+"_"+level,plan);
   const extra=store.get("extra_"+today,[]);
   DAY=plan.ids.concat(extra).map(byId).filter(Boolean);
-  const y=store.get("plan_"+dayKey(-1),null);
+  const y=getPlan(dayKey(-1),level);
   WARM=(y?y.ids.map(byId).filter(Boolean):[]).slice(0,3);
 }
-fetch("content/sentences.json").then(r=>r.json()).then(j=>{BANK=bankFrom(j);buildPlan(false);S.step=firstStep();render()})
+function setLevel(l){
+  store.set("level",l);B.level=l;B.topic="";B.limit=40;
+  document.querySelectorAll("[data-level]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.level===l));
+  S.quiz={};S.readPick=null;S.i=0;S.tries=0;
+  if(BANK.length)buildPlan();S.step=firstStep(0);
+}
+fetch("content/sentences.json").then(r=>r.json()).then(j=>{BANK=bankFrom(j);LIB.title=j.title||"";LIB.count=(j.items||[]).length;buildPlan();S.step=firstStep();render()})
   .catch(()=>{BANK=PACK.sentences.slice();toast("Cümle bankası yüklenemedi, örnek cümlelerle devam ediliyor.")});
 
 /* ---------- State ---------- */
@@ -311,16 +350,37 @@ let days = store.get("days",{});            // {date:{sec, done}}
 let custom = store.get("custom",{});         // {sentenceId:[variants]}
 let weak = store.get("weak",{});             // {word:count}
 if(!days[today]) days[today]={sec:0,done:false};
+const LISTEN={
+  A2:{title:"Kafede sipariş",
+    lines:[["A","Good morning! What would you like?"],["B","A cup of tea and a cheese sandwich, please."],["A","Small or large tea?"],["B","Large, please. How much is that?"],["A","That's eighty lira. You can pay by card."]],
+    qs:[{q:"Ne içecek istiyor?",o:["Kahve","Çay","Su"],a:1},{q:"Hangi boyu istiyor?",o:["Büyük","Küçük","Orta"],a:0},{q:"Toplam ne kadar?",o:["Sekiz lira","Sekiz yüz lira","Seksen lira"],a:2}]},
+  B2:{title:"Toplantı erteleniyor",
+    lines:[["A","Hi Selin, I'm afraid we'll have to push the review meeting back to Thursday."],["B","That's a shame. Has something come up?"],["A","The supplier still hasn't sent the final figures, so there's not much point meeting without them."],["B","Fair enough. Could you let the rest of the team know?"],["A","Sure, I'll send an invite this afternoon and keep you posted."]],
+    qs:[{q:"Toplantı hangi güne alındı?",o:["Salı","Perşembe","Cuma"],a:1},{q:"Toplantı neden erteleniyor?",o:["Tedarikçi son rakamları göndermedi","Selin hasta","Toplantı odası dolu"],a:0},{q:"Davet ne zaman gönderilecek?",o:["Yarın sabah","Bu akşam","Bu öğleden sonra"],a:2}]}
+};
+const READ={
+  A2:{title:"My weekend",
+    text:"On Saturday I usually get up late. I have a big breakfast with my family, and then we go to the park near our house. In the afternoon I meet my friends at a café. We drink tea and talk about our week. On Sunday I clean the house and cook dinner. In the evening I prepare my bag for work and go to bed early.",
+    words:{usually:["A2","genellikle","I usually walk to work."],meet:["A2","buluşmak","Let's meet at six."],prepare:["A2","hazırlamak","She prepares dinner every evening."],early:["A2","erken","I get up early on Mondays."]}},
+  B2:{title:"Working from home",
+    text:"Since the pandemic, many companies have allowed their staff to work from home at least part of the week. Supporters argue that it saves time and money, and that employees tend to be more productive without the distractions of a busy office. However, critics point out that it can be harder to collaborate, and that some people struggle to switch off at the end of the day. In practice, most organisations have settled on a hybrid model, which seems to offer the best of both worlds.",
+    words:{allowed:["B1","izin verdi","My parents allowed me to stay up late."],supporters:["B2","destekçiler","The plan has many supporters."],argue:["B2","savunmak, ileri sürmek","Some people argue that cities are too crowded."],productive:["B2","verimli","I'm more productive in the mornings."],distractions:["B2","dikkat dağıtan şeyler","Phones are a big distraction in class."],critics:["B2","eleştirmenler","Critics loved the new film."],collaborate:["B2","iş birliği yapmak","The two teams collaborate on the project."],struggle:["B2","zorlanmak","I struggle to wake up early."],settled:["B2","karar kıldı","They finally settled on a date."],hybrid:["B2","karma, hibrit","I work a hybrid schedule."]}}
+};
+LISTEN.B1=PACK.listening;READ.B1=PACK.reading;
+function curListen(){return LISTEN[lvl()]}
+function curRead(){return READ[lvl()]}
 const S = { module:"shadow", i:0, step:0, tries:0, results:{}, quiz:{}, readPick:null };
 
 const MODULES = [
-  {id:"warm",min:"2 dk",lbl:"Isınma",sub:"Dünün 3 cümlesi"},
-  {id:"shadow",min:"8 dk",lbl:"Shadowing",sub:"Günün cümleleri, 4 adım"},
-  {id:"listen",min:"5 dk",lbl:"Listening",sub:"Diyalog + sorular"},
-  {id:"read",min:"4 dk",lbl:"Reading",sub:"Sesli okuma"},
-  {id:"sum",min:"1 dk",lbl:"Özet",sub:"Puanlar, ayarlar"},
-  {id:"bank",min:"",lbl:"Cümle Bankası",sub:"Seviye ve konuya göre"}
+  {id:"warm",w:2,lbl:"Isınma",sub:"Dünün 3 cümlesi"},
+  {id:"shadow",w:8,lbl:"Shadowing",sub:"Günün cümleleri, 4 adım"},
+  {id:"listen",w:5,lbl:"Listening",sub:"Diyalog + sorular"},
+  {id:"read",w:4,lbl:"Reading",sub:"Sesli okuma"},
+  {id:"sum",w:1,lbl:"Özet",sub:"Puanlar, hatırlatma"},
+  {id:"bank",w:0,lbl:"Cümle Bankası",sub:"Seviye ve konuya göre"},
+  {id:"lib",w:0,lbl:"Kütüphane",sub:"Güncellik ve günlük süre"}
 ];
+function modMin(m){if(!m.w)return "";const g=goalMin();return Math.max(1,Math.round(m.w*g/20))+" dk"}
 const STEPS = ["Kelimeler","Dinle ve tekrarla","Türkçe → İngilizce","Sonuç"];
 function firstStep(i){const s=DAY[i==null?S.i:i];return s&&s.vocab&&s.vocab.length?0:1}
 
@@ -410,12 +470,14 @@ const view=document.getElementById("view");
 function renderPlan(){
   const doneMods = new Set();
   if(Object.keys(S.results).length===DAY.length) doneMods.add("shadow");
-  if(Object.keys(S.quiz).length===PACK.listening.qs.length) doneMods.add("listen");
-  document.getElementById("plan").innerHTML = MODULES.map(m=>`<li><button data-mod="${m.id}" aria-current="${S.module===m.id}" class="${doneMods.has(m.id)?"done":""}"><span class="min">${m.min}</span><span><span class="lbl">${m.lbl}</span><span class="sub">${m.sub}</span></span></button></li>`).join("");
+  if(Object.keys(S.quiz).length===curListen().qs.length) doneMods.add("listen");
+  document.getElementById("planHead").textContent=`Bugünün planı · ${goalMin()} dk · ${lvl()}`;
+  document.getElementById("goalNote").textContent=goalMin();
+  document.getElementById("plan").innerHTML = MODULES.map(m=>`<li><button data-mod="${m.id}" aria-current="${S.module===m.id}" class="${doneMods.has(m.id)?"done":""}"><span class="min">${modMin(m)}</span><span><span class="lbl">${m.lbl}</span><span class="sub">${m.sub}</span></span></button></li>`).join("");
 }
 function render(){
   renderPlan();
-  ({warm:renderWarm,shadow:renderShadow,listen:renderListen,read:renderRead,sum:()=>renderSum(),bank:renderBank})[S.module]();
+  ({warm:renderWarm,shadow:renderShadow,listen:renderListen,read:renderRead,sum:()=>renderSum(),bank:renderBank,lib:renderLib})[S.module]();
 }
 function recorder(target,mode,hint){return `<div class="recbox"><button class="btn rec" data-rec="${target}" data-mode="${mode}">${I.mic}<span>Konuş</span></button><span class="recstat" id="stat-${target}">${hint}</span></div>`}
 
@@ -467,7 +529,7 @@ function renderShadow(){
     </div>`;
   }
   const last=S.i===DAY.length-1;
-  view.innerHTML=`<div class="head"><div><span class="eyebrow">Shadowing · Cümle ${S.i+1}/${DAY.length} · ${s.level} · ${esc(s.topic)}</span><h1>${STEPS[S.step]}</h1></div></div>
+  view.innerHTML=`<div class="head"><div><span class="eyebrow"><span lang="en">Shadowing</span> · Cümle ${S.i+1}/${DAY.length} · ${s.level} · ${esc(s.topic)}</span><h1>${STEPS[S.step]}</h1></div></div>
     ${stepper}${body}
     <div class="foot"><button class="btn" data-nav="prev" ${S.i===0&&S.step===firstStep()?"disabled":""}>Geri</button>
     <button class="btn primary" data-nav="next">${S.step<3?"Sonraki adım":last?"Listening'e geç":"Sonraki cümle"}</button></div>`;
@@ -524,8 +586,8 @@ function renderWarm(){
 }
 
 function renderListen(){
-  const L=PACK.listening;
-  view.innerHTML=`<div class="head"><div><span class="eyebrow">Listening · 5 dk</span><h1>${L.title}</h1></div></div>
+  const L=curListen();
+  view.innerHTML=`<div class="head"><div><span class="eyebrow"><span lang="en">Listening</span> · ${lvl()}</span><h1>${L.title}</h1></div></div>
   <div class="stack">
     <p>Diyaloğu önce metne bakmadan dinle, sonra soruları cevapla.</p>
     <div class="row">${playBtn("Diyaloğu dinle",'data-dialog="n"')}<button class="btn" data-dialog="s">${I.slow}Yavaş</button>${stopBtn()}<button class="btn ghost" data-reveal="dlg">Metni göster</button></div>
@@ -538,10 +600,10 @@ function renderListen(){
 }
 
 function renderRead(){
-  const R=PACK.reading;
+  const R=curRead();
   const html=esc(R.text).replace(/\b([A-Za-z]+)\b/g,(m)=>R.words[m.toLowerCase()]?`<button class="word" data-rw="${m.toLowerCase()}">${m}</button>`:m);
   const p=S.readPick&&R.words[S.readPick];
-  view.innerHTML=`<div class="head"><div><span class="eyebrow">Reading · 4 dk</span><h1>${R.title}</h1></div></div>
+  view.innerHTML=`<div class="head"><div><span class="eyebrow"><span lang="en">Reading</span> · ${lvl()}</span><h1>${R.title}</h1></div></div>
   <div class="stack">
     <p>Metni sesli oku. Altı noktalı kelimeye dokunursan anlamını görürsün.</p>
     <div class="row">${playBtn("Örnek okumayı dinle",'data-readplay="n"')}<button class="btn" data-readplay="s">${I.slow}Yavaş</button>${stopBtn()}</div>
@@ -562,17 +624,17 @@ function renderSum(){
   const rs=DAY.map(s=>({s,r:S.results[s.id]||{}}));
   const sh=rs.filter(x=>x.r.shadow).map(x=>x.r.shadow.score), tr=rs.filter(x=>x.r.tr).map(x=>x.r.tr.score);
   const avg=a=>a.length?Math.round(a.reduce((x,y)=>x+y,0)/a.length)+"%":"–";
-  const qc=Object.entries(S.quiz).filter(([k,v])=>PACK.listening.qs[k].a===v).length;
+  const qc=Object.entries(S.quiz).filter(([k,v])=>curListen().qs[k]&&curListen().qs[k].a===v).length;
   const words=DAY.length;
   const weakList=Object.entries(weak).sort((a,b)=>b[1]-a[1]).slice(0,6);
   const t1=store.get("rem1","08:30"), t2=store.get("rem2","20:30");
   view.innerHTML=`<div class="head"><div><span class="eyebrow">Özet · Gün ${Object.keys(days).length}</span><h1>Bugünün sonucu</h1></div></div>
   <div class="stack">
     <div class="summary">
-      <div class="stat"><b>${fmt(days[today].sec)}</b><span>Aktif süre (hedef 20:00)</span></div>
+      <div class="stat"><b>${fmt(days[today].sec)}</b><span>Aktif süre (hedef ${goalMin()}:00)</span></div>
       <div class="stat"><b>${avg(sh)}</b><span>Shadowing ortalaması</span></div>
       <div class="stat"><b>${avg(tr)}</b><span>TR → EN ortalaması</span></div>
-      <div class="stat"><b>${qc}/${PACK.listening.qs.length}</b><span>Listening doğru</span></div>
+      <div class="stat"><b>${qc}/${curListen().qs.length}</b><span>Listening doğru</span></div>
       <div class="stat"><b>${words}</b><span>Bugünkü cümle</span></div>
     </div>
     <h2 style="font-size:1.15rem;margin-top:8px">Cümle cümle</h2>
@@ -581,14 +643,6 @@ function renderSum(){
     </tbody></table></div>
     <h2 style="font-size:1.15rem;margin-top:8px">Tekrar listesi</h2>
     <p>${weakList.length?weakList.map(([w,c])=>`<button class="btn ghost" data-word="${esc(w)}">${I.slow}${esc(w)} <span class="tag">×${c}</span></button>`).join(" "):"Henüz zorlandığın kelime yok. Shadowing yaptıkça burası dolar; aynı kelimede 3 kez zorlanırsan sonraki günlerde tekrar sorulur."}</p>
-    <h2 style="font-size:1.15rem;margin-top:8px">Günlük cümleler</h2>
-    <p>Her gün cümle bankasından seçtiğin seviyede yeni cümleler gelir; kaldığın yerden devam eder.</p>
-    <div class="row" style="max-width:420px">
-      <div style="flex:1;min-width:150px"><label for="levelSel" class="tag">Seviye</label>
-        <select id="levelSel">${Object.entries(LEVELS).map(([k,v])=>`<option value="${k}" ${store.get("level","B1")===k?"selected":""}>${v}</option>`).join("")}</select></div>
-      <div style="flex:1;min-width:150px"><label for="countSel" class="tag">Günde kaç cümle</label>
-        <select id="countSel">${[4,6,8,10].map(n=>`<option value="${n}" ${store.get("count",6)===n?"selected":""}>${n} cümle</option>`).join("")}</select></div>
-    </div>
     <h2 style="font-size:1.15rem;margin-top:8px">Günlük hatırlatma</h2>
     <p>Uygulama internet olmadan çalıştığı için hatırlatmayı telefonunun takvimi yapar. Saatleri seç, dosyayı indir ve açınca takvimine ekle. Her gün bu saatlerde bildirim gelir.</p>
     <div class="row" style="max-width:420px"><div style="flex:1;min-width:140px"><label for="rem1" class="tag">Sabah</label><input type="time" id="rem1" value="${t1}"></div>
@@ -604,7 +658,7 @@ function renderSum(){
   </div>
   <div class="foot"><button class="btn" data-go="read">Geri</button><button class="btn primary" data-restart>Shadowing'i baştan başlat</button></div>`;
 }
-const B={level:"",topic:"",q:"",limit:40};
+const B={level:lvl(),topic:"",q:"",limit:40};
 function renderBank(){
   const lv=B.level, list0=BANK.filter(x=>!lv||x.level===lv);
   const topics=[...new Set(list0.map(x=>x.topic))];
@@ -629,11 +683,75 @@ function renderBank(){
     ${list.length>B.limit?`<button class="btn" data-bmore>Daha fazla göster</button>`:""}
   </div>`;
 }
+function renderLib(){
+  const g=goalMin(),c=countFor(g);
+  const lvRows=["A2","B1","B2"].map(l=>{
+    const seq=seqFor(l),n=seq.length||1;
+    const plan=getPlan(today,l);let done=plan?(plan.start+plan.ids.length):store.get("ptr_"+l,0);done=Math.min(done,n);
+    const left=Math.max(0,Math.ceil((n-done)/c));
+    return `<div class="lvlrow"><span class="lvl" style="text-align:center">${l}</span>
+      <div class="stack" style="gap:4px"><div class="prog2"><i style="width:${Math.round(done/n*100)}%"></i></div>
+      <span class="tag">${done} / ${seq.length} cümle çalışıldı · bu tempoyla ${left} gün kaldı</span></div>
+      <span class="tag" style="font-variant-numeric:tabular-nums">%${Math.round(done/n*100)}</span></div>`}).join("");
+  const counts=["A2","B1","B2"].map(l=>seqFor(l).length);
+  const topics=new Set(BANK.map(x=>x.topic)).size;
+  const modelOk=store.get("modelReady",false);
+  const checked=LIB.checked?new Date(LIB.checked).toLocaleString("tr-TR",{dateStyle:"short",timeStyle:"short"}):"henüz denetlenmedi";
+  view.innerHTML=`<div class="head"><div><span class="eyebrow">Kütüphane · sürüm ${LIB_VERSION}</span><h1>Kütüphane ve günlük süre</h1></div></div>
+  <div class="stack">
+    <h2 style="font-size:1.15rem">Günlük çalışma süresi</h2>
+    <p>En az 20, en çok 60 dakika seçebilirsin. Süre arttıkça günlük cümle sayısı ve bölüm süreleri de artar.</p>
+    <div class="range"><input type="range" id="goalRange" min="20" max="60" step="5" value="${g}" aria-label="Günlük süre (dakika)"><output id="goalOut">${g} dk</output></div>
+    <div class="ticks" aria-hidden="true"><span>20</span><span>30</span><span>40</span><span>50</span><span>60</span></div>
+    <p class="tag" id="goalInfo">Günde ${c} yeni cümle · ${MODULES.filter(m=>m.w).map(m=>`<span lang="${/ing$/.test(m.lbl)?"en":"tr"}">${m.lbl}</span> ${modMin(m)}`).join(" · ")}</p>
+
+    <h2 style="font-size:1.15rem;margin-top:8px">Kütüphanenin güncelliği</h2>
+    <div class="summary">
+      <div class="stat"><b>${LIB_VERSION}</b><span>Kütüphane sürümü</span></div>
+      <div class="stat"><b>${APP_VERSION}</b><span>Uygulama sürümü</span></div>
+      <div class="stat"><b>${BANK.length}</b><span>Toplam cümle</span></div>
+      <div class="stat"><b>${topics}</b><span>Konu</span></div>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th>İçerik</th><th>A2</th><th>B1</th><th>B2</th></tr></thead><tbody>
+      <tr><td>Cümle</td><td class="n">${counts[0]}</td><td class="n">${counts[1]}</td><td class="n">${counts[2]}</td></tr>
+      <tr><td>Kelime kartlı cümle</td><td class="n">${["A2","B1","B2"].map(l=>seqFor(l).filter(x=>x.vocab.length).length).join('</td><td class="n">')}</td></tr>
+      <tr><td>Listening diyaloğu</td><td class="n">1</td><td class="n">1</td><td class="n">1</td></tr>
+      <tr><td>Reading metni</td><td class="n">1</td><td class="n">1</td><td class="n">1</td></tr>
+    </tbody></table></div>
+    <p class="tag">Kaynak: <span lang="en">${esc(LIB.title||"Daily conversation sentences")}</span> (${LIB.count} cümle) ve iş İngilizcesi cümleleri (${PACK.sentences.length})</p>
+    <div class="status">
+      <span class="pill ${navigator.onLine?"ok":"warn"}">${navigator.onLine?"İnternet var":"İnternet yok"}</span>
+      <span class="pill ${modelOk?"ok":"warn"}">${modelOk?"Ses tanıma indirildi":"Ses tanıma indirilmedi"}</span>
+      <span class="pill" id="storePill">Depolama ölçülüyor</span>
+    </div>
+    <div class="row"><button class="btn primary" data-checkupd>Güncellemeyi denetle</button><span class="tag" id="updStat">Son denetim: ${checked}${LIB.status?" · "+esc(LIB.status):""}</span></div>
+
+    <h2 style="font-size:1.15rem;margin-top:8px">İlerleme</h2>
+    <div class="stack" style="gap:12px">${lvRows}</div>
+
+    <h2 style="font-size:1.15rem;margin-top:8px">Sürüm geçmişi</h2>
+    <ul class="changes">${CHANGES.map(c=>`<li><b>${c[0]}</b> <span class="tag">${c[1]}</span><br>${c[2]}</li>`).join("")}</ul>
+  </div>`;
+  if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(e=>{const el=document.getElementById("storePill");if(el)el.textContent=`Depolama: ${Math.round((e.usage||0)/1048576)} MB kullanılıyor`}).catch(()=>{});
+}
+async function checkUpdate(){
+  const st=document.getElementById("updStat");if(st)st.textContent="Denetleniyor…";
+  if(!navigator.onLine){LIB.status="İnternet yok, denetlenemedi";LIB.checked=Date.now();renderLib();return}
+  try{
+    const r=await fetch("content/meta.json?t="+Date.now(),{cache:"no-store"});const m=await r.json();
+    let upd=false;
+    if("serviceWorker" in navigator){const reg=await navigator.serviceWorker.getRegistration();if(reg){await reg.update();upd=!!(reg.installing||reg.waiting)}}
+    const newer=m.libVersion!==LIB_VERSION||m.appVersion!==APP_VERSION;
+    LIB.checked=Date.now();
+    LIB.status=newer||upd?`Yeni sürüm var (kütüphane ${m.libVersion}, uygulama ${m.appVersion}). Uygulamayı kapatıp açınca yüklenir.`:"Kütüphane güncel";
+  }catch(e){LIB.checked=Date.now();LIB.status="Sunucuya ulaşılamadı"}
+  renderLib();
+}
 function ics(a,b){
   const d=new Date();d.setDate(d.getDate()+1);
   const ds=d.toISOString().slice(0,10).replace(/-/g,"");
-  const ev=(t,title,uid)=>`BEGIN:VEVENT\nUID:${uid}@speakdaily\nDTSTART;TZID=Europe/Istanbul:${ds}T${t.replace(":","")}00\nDURATION:PT20M\nRRULE:FREQ=DAILY\nSUMMARY:${title}\nBEGIN:VALARM\nACTION:DISPLAY\nDESCRIPTION:${title}\nTRIGGER:PT0M\nEND:VALARM\nEND:VEVENT`;
-  return `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//SpeakDaily//TR\n${ev(a,"SpeakDaily: 20 dk İngilizce pratik","sabah")}\n${ev(b,"SpeakDaily: Bugünkü hedefin bitti mi?","aksam")}\nEND:VCALENDAR`;
+  const ev=(t,title,uid)=>`BEGIN:VEVENT\nUID:${uid}@speakdaily\nDTSTART;TZID=Europe/Istanbul:${ds}T${t.replace(":","")}00\nDURATION:PT${goalMin()}M\nRRULE:FREQ=DAILY\nSUMMARY:${title}\nBEGIN:VALARM\nACTION:DISPLAY\nDESCRIPTION:${title}\nTRIGGER:PT0M\nEND:VALARM\nEND:VEVENT`;
+  return `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//SpeakDaily//TR\n${ev(a,`SpeakDaily: ${goalMin()} dk İngilizce pratik`,"sabah")}\n${ev(b,"SpeakDaily: Bugünkü hedefin bitti mi?","aksam")}\nEND:VCALENDAR`;
 }
 
 /* ---------- Events ---------- */
@@ -641,6 +759,8 @@ document.addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
   const s=DAY[S.i], d=b.dataset;
   if("stop" in d){stopAudio();return}
+  if(d.level){stopAudio();cancelRec();setLevel(d.level);render();toast(`${d.level} seviyesine geçildi.`);return}
+  if("checkupd" in d) return checkUpdate();
   if(d.mod||d.go||d.nav){stopAudio();cancelRec()}
   if(d.mod){S.module=d.mod;render();window.scrollTo({top:0});return}
   if(d.go){S.module=d.go;render();window.scrollTo({top:0});return}
@@ -652,11 +772,11 @@ document.addEventListener("click",e=>{
   if(d.word) return speak(d.word,"en",true);
   if(d.warm!=null) return speak((WARM.length?WARM:DAY)[d.warm].en,"en");
   if(d.reveal){document.getElementById(d.reveal).classList.toggle("hidden-text");return}
-  if(d.dialog) return speak(PACK.listening.lines.map(l=>l[1]).join(" "),"en",d.dialog==="s");
-  if(d.readplay) return speak(PACK.reading.text,"en",d.readplay==="s");
+  if(d.dialog) return speak(curListen().lines.map(l=>l[1]).join(" "),"en",d.dialog==="s");
+  if(d.readplay) return speak(curRead().text,"en",d.readplay==="s");
   if(d.rw){S.readPick=d.rw;renderRead();return}
-  if("rwtr" in d){const p=PACK.reading.words[S.readPick];return speak(p[1],"tr")}
-  if("rwex" in d){const p=PACK.reading.words[S.readPick];return speak(p[2],"en")}
+  if("rwtr" in d){const p=curRead().words[S.readPick];return speak(p[1],"tr")}
+  if("rwex" in d){const p=curRead().words[S.readPick];return speak(p[2],"en")}
   if(d.check) return check(d.check);
   if("accept" in d){const r=S.results[s.id].tr;(custom[s.id]=custom[s.id]||[]).push(r.text);store.set("custom",custom);r.score=100;r.best=r.text;r.ops=align(norm(r.text),norm(r.text));r.notes=[];render();toast("Cevabın kabul edilen cevaplara eklendi.");return}
   if("readcheck" in d) return readCheck();
@@ -676,22 +796,19 @@ document.addEventListener("click",e=>{
     render();view.scrollIntoView({block:"start"});return}
   if(d.nav==="prev"){if(S.step>firstStep())S.step--;else if(S.i>0){S.i--;S.step=3}render();return}
 });
+document.addEventListener("input",e=>{if(e.target.id==="goalRange"){const g=+e.target.value;document.getElementById("goalOut").textContent=g+" dk"}});
 let bq;document.addEventListener("input",e=>{if(e.target.id==="bankQ"){clearTimeout(bq);const v=e.target.value;bq=setTimeout(()=>{B.q=v;B.limit=40;renderBank();const el=document.getElementById("bankQ");el.focus();el.setSelectionRange(v.length,v.length)},250)}});
 document.addEventListener("change",e=>{
   const t=e.target;
   if(t.name&&t.name.startsWith("q")){S.quiz[+t.name.slice(1)]=+t.value;renderListen();renderPlan();return}
   if(t.id==="modelSel"){model=t.value;store.set("model",model);store.set("modelReady",false);modelUI("idle");toast("Model değişti. İlk kullanımda bir kez indirilecek.");return}
-  if(t.id==="levelSel"||t.id==="countSel"){
-    store.set(t.id==="levelSel"?"level":"count",t.id==="levelSel"?t.value:+t.value);
-    if(!Object.keys(S.results).length){buildPlan(true);S.i=0;S.step=firstStep(0);toast("Bugünün cümleleri yenilendi.")}
-    else toast("Yarından itibaren geçerli. Bugünkü cümlelere devam ediyorsun.");
-    return}
+  if(t.id==="goalRange"){store.set("goalMin",+t.value);if(BANK.length)buildPlan();tickUI();renderPlan();renderLib();toast(`Günlük hedef ${goalMin()} dakika oldu.`);return}
   if(t.id==="bankLevel"||t.id==="bankTopic"){B[t.id==="bankLevel"?"level":"topic"]=t.value;if(t.id==="bankLevel")B.topic="";B.limit=40;renderBank();return}
   if(t.id==="rem1"||t.id==="rem2"){store.set(t.id,t.value);document.getElementById("ics").textContent=ics(document.getElementById("rem1").value,document.getElementById("rem2").value)}
 });
 function readCheck(){
   const tx=document.getElementById("ans3").value.trim(); if(!tx){toast("Önce metni sesli oku.");return}
-  const tw=norm(PACK.reading.text),ops=align(tw,norm(tx)),sc=scoreOps(ops,tw.length);
+  const tw=norm(curRead().text),ops=align(tw,norm(tx)),sc=scoreOps(ops,tw.length);
   document.getElementById("res3").innerHTML=`<div class="result ${grade(sc)}"><div class="score"><b>${sc}%</b><span>${sc>=85?"Akıcı ve eksiksiz okudun.":"Atladığın ya da farklı okuduğun kelimeler işaretli."}</span></div><div class="diff">${diffHTML(ops)}</div></div>`;
 }
 function selectText(id){const r=document.createRange();r.selectNodeContents(document.getElementById(id));const s=getSelection();s.removeAllRanges();s.addRange(r);toast("Metin seçildi, kopyalayabilirsin.")}
@@ -704,6 +821,7 @@ function setAccent(a){accent=a;store.set("accent",a);document.getElementById("ac
 document.getElementById("accUS").onclick=()=>setAccent("us");
 document.getElementById("accGB").onclick=()=>setAccent("gb");
 setAccent(accent);
+document.querySelectorAll("[data-level]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.level===lvl()));
 
 /* ---------- Active timer & streak ---------- */
 let lastAct=Date.now();
@@ -712,14 +830,14 @@ function fmt(s){return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
 function streak(){let n=0;const d=new Date();for(;;){const k=d.toISOString().slice(0,10);if(days[k]&&days[k].done){n++;d.setDate(d.getDate()-1)}else if(k===today){d.setDate(d.getDate()-1)}else break}return n}
 function tickUI(){
   const sec=days[today].sec;
-  document.getElementById("timeTxt").textContent=`${fmt(Math.min(sec,5999))} / 20:00`;
-  document.getElementById("timeBar").style.width=Math.min(100,sec/12)+"%";
+  document.getElementById("timeTxt").textContent=`${fmt(Math.min(sec,5999))} / ${goalMin()}:00`;
+  document.getElementById("timeBar").style.width=Math.min(100,sec/goalSec()*100)+"%";
   document.getElementById("streakChip").textContent=`Seri ${streak()} gün`;
 }
 setInterval(()=>{
   if(document.visibilityState==="visible"&&Date.now()-lastAct<90000){
     days[today].sec++;
-    if(!days[today].done&&days[today].sec>=1200){days[today].done=true;toast("20 dakika tamam. Bugünün hedefini bitirdin.")}
+    if(!days[today].done&&days[today].sec>=goalSec()){days[today].done=true;toast(`${goalMin()} dakika tamam. Bugünün hedefini bitirdin.`)}
     if(days[today].sec%5===0)store.set("days",days);
     tickUI();
   }
